@@ -6,6 +6,7 @@ import { cleanPath, trimPathLeft } from '@tanstack/router-core'
 
 let latestTask = 0
 export const rootPathId = '__root'
+export const layoutPathId = '_layout'
 export const fileRouteRegex = /new\s+FileRoute\(([^)]*)\)/g
 
 export type RouteNode = {
@@ -118,7 +119,7 @@ export async function generator(config: Config) {
   routeNodes = multiSortBy(routeNodes, [
     (d) => (d.routePath === '/' ? -1 : 1),
     (d) => d.routePath?.split('/').length,
-    (d) => (d.routePath?.endsWith("_layout") ? -1 : 1),
+    (d) => (d.routePath?.endsWith(layoutPathId) ? -1 : 1),
     (d) => d.routePath,
   ]).filter((d) => d.routePath !== `/${rootPathId}`)
 
@@ -132,7 +133,7 @@ export async function generator(config: Config) {
       ? node.routePath?.replace(node.parent.routePath!, '') || '/'
       : node.routePath
 
-    const isLayout = node.routePath?.endsWith("/_layout")
+    const isLayout = node.routePath?.endsWith(`/${layoutPathId}`)
     const trimmedPath = trimPathLeft(node.path ?? '')
 
     const split = trimmedPath?.split('/') ?? []
@@ -144,7 +145,7 @@ export async function generator(config: Config) {
     node.cleanedPath = removeUnderscores(node.path) ?? ''
 
     if (isLayout) {
-      const layoutChildRoute = node.routePath?.replace("/_layout", "");
+      const layoutChildRoute = node.routePath?.replace(`/${layoutPathId}`, "");
       const layoutChild = routeNodes.find(d => d.routePath === layoutChildRoute)
 
       if (layoutChild) {
@@ -162,21 +163,6 @@ export async function generator(config: Config) {
       routeTree.push(node)
     }
   })
-
-  function removeExistingChild(tree: RouteNode[], routePath: string) {
-    for (const child of tree) {
-      const index = tree.findIndex(d => d.routePath === routePath)
-
-      if (index > -1) {
-        tree.splice(index, 1);
-        return;
-      }
-
-      if (child.children) {
-        removeExistingChild(child.children, routePath)
-      }
-    }
-  }
 
   async function buildRouteConfig(
     nodes: RouteNode[],
@@ -203,6 +189,24 @@ export async function generator(config: Config) {
       const route = `${node.variableName}Route`
 
       if (node.children?.length) {
+
+        // If the current route is a layout i take the index child
+        if (node.routePath?.endsWith(`/${layoutPathId}`)) {
+          const indexChild = node.children.pop();
+
+          if (indexChild) {
+            // Then we flatten the children to put everyone under the same layout
+            const flattenedChildren = [indexChild, ...(indexChild.children ?? [])]
+
+            // and we remove the children from the index route to avoid duplication
+            indexChild.children = undefined;
+
+            // then we pass the children to the recursion to analyse deep down
+            const childConfigs = await buildRouteConfig(flattenedChildren, depth + 1)
+            return `${route}.addChildren([${spaces(depth * 4)}${childConfigs}])`
+          }
+        }
+
         const childConfigs = await buildRouteConfig(node.children, depth + 1)
         return `${route}.addChildren([${spaces(depth * 4)}${childConfigs}])`
       }
@@ -373,7 +377,7 @@ function hasParentRoute(routes: RouteNode[], routeToCheck: string | undefined): 
     return null;
   }
 
-  if (!routeToCheck.endsWith("/_layout")) {
+  if (!routeToCheck.endsWith(`/${layoutPathId}`)) {
     const orderedRoutes = multiSortBy(routes, [(d) => (d.routePath?.split('/').length ?? 0) * -1])
 
     for (const route of orderedRoutes) {
@@ -386,4 +390,19 @@ function hasParentRoute(routes: RouteNode[], routeToCheck: string | undefined): 
 
   const parentRoute = bubbleUp(routeToCheck);
   return hasParentRoute(routes, parentRoute)
+}
+
+function removeExistingChild(tree: RouteNode[], routePath: string) {
+  for (const child of tree) {
+    const index = tree.findIndex(d => d.routePath === routePath)
+
+    if (index > -1) {
+      tree.splice(index, 1);
+      return;
+    }
+
+    if (child.children) {
+      removeExistingChild(child.children, routePath)
+    }
+  }
 }
