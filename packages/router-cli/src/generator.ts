@@ -19,7 +19,7 @@ export type RouteNode = {
   isNonLayout?: boolean
   isRoot?: boolean
   children?: RouteNode[]
-  parent?: RouteNode
+  parent?: RouteNode,
 }
 
 async function getRouteNodes(config: Config) {
@@ -62,10 +62,10 @@ async function getRouteNodes(config: Config) {
 
           // Remove the index from the route path and
           // if the route path is empty, use `/'
-          if (routePath === 'index') {
+          if (routePath === '/index') {
             routePath = '/'
           } else if (routePath.endsWith('/index')) {
-            routePath = routePath.replace(/\/index$/, '/')
+            routePath = routePath.replace(/\/index$/, '')
           }
 
           routeNodes.push({
@@ -90,8 +90,6 @@ let first = false
 let skipMessage = false
 
 export async function generator(config: Config) {
-  console.log()
-
   if (!first) {
     console.log('🔄 Generating routes...')
     first = true
@@ -120,23 +118,13 @@ export async function generator(config: Config) {
   routeNodes = multiSortBy(routeNodes, [
     (d) => (d.routePath === '/' ? -1 : 1),
     (d) => d.routePath?.split('/').length,
-    (d) => (d.routePath?.endsWith('/') ? -1 : 1),
+    (d) => (d.routePath?.endsWith("_layout") ? -1 : 1),
     (d) => d.routePath,
   ]).filter((d) => d.routePath !== `/${rootPathId}`)
 
   const routeTree: RouteNode[] = []
 
-  // Loop over the flat list of routeNodes and
-  // build up a tree based on the routeNodes' routePath
   routeNodes.forEach((node) => {
-    // routeNodes.forEach((existingNode) => {
-    //   if (
-    //     node.routePath?.startsWith(`${existingNode?.routePath ?? ''}/`)
-    //     // node.routePath.length > existingNode.routePath!.length
-    //   ) {
-    //     node.parent = existingNode
-    //   }
-    // })
     const parentRoute = hasParentRoute(routeNodes, node.routePath)
     if (parentRoute) node.parent = parentRoute
 
@@ -144,23 +132,51 @@ export async function generator(config: Config) {
       ? node.routePath?.replace(node.parent.routePath!, '') || '/'
       : node.routePath
 
+    const isLayout = node.routePath?.endsWith("/_layout")
     const trimmedPath = trimPathLeft(node.path ?? '')
 
     const split = trimmedPath?.split('/') ?? []
-    let first = split[0] ?? trimmedPath ?? ''
+    let name = (isLayout ? split.pop() : split[0]) ?? trimmedPath ?? '';
 
-    node.isNonPath = first.startsWith('_')
-    node.isNonLayout = first.endsWith('_')
+    node.isNonPath = name.startsWith('_')
+    node.isNonLayout = name.endsWith('_')
 
     node.cleanedPath = removeUnderscores(node.path) ?? ''
 
+    if (isLayout) {
+      const layoutChildRoute = node.routePath?.replace("/_layout", "");
+      const layoutChild = routeNodes.find(d => d.routePath === layoutChildRoute)
+
+      if (layoutChild) {
+        layoutChild.parent = node;
+        node.children = [layoutChild]
+
+        removeExistingChild(routeTree, layoutChild.routePath!)
+      }
+    }
+
     if (node.parent) {
-      node.parent.children = node.parent.children ?? []
+      node.parent.children ??= []
       node.parent.children.push(node)
     } else {
       routeTree.push(node)
     }
   })
+
+  function removeExistingChild(tree: RouteNode[], routePath: string) {
+    for (const child of tree) {
+      const index = tree.findIndex(d => d.routePath === routePath)
+
+      if (index > -1) {
+        tree.splice(index, 1);
+        return;
+      }
+
+      if (child.children) {
+        removeExistingChild(child.children, routePath)
+      }
+    }
+  }
 
   async function buildRouteConfig(
     nodes: RouteNode[],
@@ -206,7 +222,6 @@ export async function generator(config: Config) {
     ...multiSortBy(routeNodes, [
       (d) => (d.routePath?.includes(`/${rootPathId}`) ? -1 : 1),
       (d) => d.routePath?.split('/').length,
-      (d) => (d.routePath?.endsWith("index'") ? -1 : 1),
       (d) => d,
     ]).map((node) => {
       return `import { route as ${node.variableName}Route } from './${sanitize(removeExt(
@@ -233,25 +248,10 @@ export async function generator(config: Config) {
   const routeOptions = routeNodes
     .map((routeNode) => {
       return `Object.assign(${routeNode.variableName ?? 'root'}Route.options, {
-        ${[
-          routeNode.isNonPath
-            ? `id: '${routeNode.cleanedPath}'`
-            : `path: '${routeNode.cleanedPath}'`,
-          `getParentRoute: () => ${routeNode.parent?.variableName ?? 'root'
-          }Route`,
-          // `\n// ${JSON.stringify(
-          //   {
-          //     ...routeNode,
-          //     parent: undefined,
-          //     children: undefined,
-          //     fullPath: undefined,
-          //     variableName: undefined,
-          //   },
-          //   null,
-          //   2,
-          // )
-          //   .split('\n')
-          //   .join('\n// ')}`,
+        ${[routeNode.isNonPath
+          ? `id: '${routeNode.cleanedPath}'`
+          : `path: '${routeNode.cleanedPath}'`,
+        `getParentRoute: () => ${routeNode.parent?.variableName ?? 'root'}Route`,
         ]
           .filter(Boolean)
           .join(',')}
@@ -362,18 +362,28 @@ function replaceBackslash(s?: string) {
   return s?.replace(/\\/gi, '/')
 }
 
+function bubbleUp(routeToCheck: string) {
+  const segments = routeToCheck.split("/");
+  segments.pop();
+  return segments.join("/");
+}
+
 function hasParentRoute(routes: RouteNode[], routeToCheck: string | undefined): RouteNode | null {
   if (!routeToCheck || routeToCheck === "/") {
     return null;
   }
-  for (const route of routes) {
-    if (route.routePath === '/') continue;
-    if (routeToCheck.startsWith(`${route.routePath}/`) && route.routePath !== routeToCheck) {
-      return route;
+
+  if (!routeToCheck.endsWith("/_layout")) {
+    const orderedRoutes = multiSortBy(routes, [(d) => (d.routePath?.split('/').length ?? 0) * -1])
+
+    for (const route of orderedRoutes) {
+      if (route.routePath === '/') continue;
+      if (routeToCheck.startsWith(`${route.routePath}/`) && route.routePath !== routeToCheck) {
+        return route;
+      }
     }
   }
-  const segments = routeToCheck.split("/");
-  segments.pop(); // Remove the last segment
-  const parentRoute = segments.join("/");
-  return hasParentRoute(routes, parentRoute);
+
+  const parentRoute = bubbleUp(routeToCheck);
+  return hasParentRoute(routes, parentRoute)
 }
