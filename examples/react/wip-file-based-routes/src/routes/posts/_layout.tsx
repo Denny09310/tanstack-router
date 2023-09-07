@@ -3,7 +3,7 @@ import { fetchPosts } from "@/utils";
 import { Link, Outlet } from "@tanstack/react-router";
 import { FileRoute } from "@tanstack/router-core";
 
-export const route = new FileRoute('/posts/_layout').createRoute({
+export const route = new FileRoute('/posts').createRoute({
   loader: fetchPosts,
   component: () => {
     const posts = route.useLoader();

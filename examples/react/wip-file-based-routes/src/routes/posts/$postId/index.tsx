@@ -1,7 +1,8 @@
 import { fetchPost } from "@/utils";
+import { Link } from "@tanstack/react-router";
 import { FileRoute } from "@tanstack/router-core";
 
-export const route = new FileRoute('/posts/$postId').createRoute({
+export const route = new FileRoute('/posts/$postId/').createRoute({
   loader: ({ params: { postId } }) => fetchPost(postId),
   errorComponent: () => <div>Something went wrong</div>,
   component: () => {
@@ -13,7 +14,7 @@ export const route = new FileRoute('/posts/$postId').createRoute({
           <h4 className="text-xl font-bold underline">{post.title}</h4>
           <div className="text-sm">{post.body}</div>
         </div>
-        {/* <Link
+        <Link
           to="/posts/$postId/deep"
           params={{
             postId: post.id,
@@ -21,7 +22,7 @@ export const route = new FileRoute('/posts/$postId').createRoute({
           className="py-1 px-2 rounded bg-indigo-400 self-start hover:bg-indigo-700"
         >
           Deep View
-        </Link> */}
+        </Link>
       </div>
     );
   },
