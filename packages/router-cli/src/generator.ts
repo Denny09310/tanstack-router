@@ -65,17 +65,18 @@ async function getRouteNodes(config: Config) {
               cleanPath(`/${filePathNoExt.split('.').join('/')}`),
             ) ?? ''
 
-          const layout = isLayout(routePath) ?? false
-          const variableName = fileToVariable(routePath)
+          const isLayout = checkIsLayout(routePath) ?? false
+          let variableName = fileToVariable(routePath)
 
           // Remove the index from the route path and
           // if the route path is empty, use `/'
           if (routePath === '/index') {
             routePath = '/'
-          } else if (layout) {
+          } else if (isLayout) {
             routePath = routePath.replace(`/${layoutPathId}`, '')
           } else if (routePath.endsWith('/index')) {
             routePath = routePath.replace(/\/index$/, '/')
+            variableName = variableName.replace('Index', '')
           }
 
           routeNodes.push({
@@ -83,7 +84,7 @@ async function getRouteNodes(config: Config) {
             fullPath,
             routePath,
             variableName,
-            isLayout: layout,
+            isLayout,
           })
         }
       }),
@@ -267,8 +268,7 @@ export async function generator(config: Config) {
           routeNode.isNonPath
             ? `id: '${routeNode.cleanedPath}'`
             : `path: '${routeNode.cleanedPath}'`,
-          `getParentRoute: () => ${
-            routeNode.parent?.variableName ?? 'root'
+          `getParentRoute: () => ${routeNode.parent?.variableName ?? 'root'
           }Route`,
         ]
           .filter(Boolean)
@@ -363,7 +363,7 @@ export function multiSortBy<T>(
     .map(([d]) => d)
 }
 
-function isLayout(routePath: string | undefined) {
+function checkIsLayout(routePath: string | undefined) {
   return routePath?.endsWith(`/${layoutPathId}`)
 }
 

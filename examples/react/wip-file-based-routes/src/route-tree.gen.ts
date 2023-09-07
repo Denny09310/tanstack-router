@@ -1,10 +1,10 @@
 import { route as rootRoute } from "./routes/__root"
 import { route as PostsLayoutRoute } from "./routes/posts/_layout"
 import { route as IndexRoute } from "./routes"
-import { route as PostsIndexRoute } from "./routes/posts"
+import { route as PostsRoute } from "./routes/posts"
 import { route as PostsPostIdDeepLayoutRoute } from "./routes/posts/$postId/deep/_layout"
-import { route as PostsPostIdIndexRoute } from "./routes/posts/$postId"
-import { route as PostsPostIdDeepIndexRoute } from "./routes/posts/$postId/deep"
+import { route as PostsPostIdRoute } from "./routes/posts/$postId"
+import { route as PostsPostIdDeepRoute } from "./routes/posts/$postId/deep"
 
 declare module "@tanstack/react-router" {
   interface FileRoutesByPath {
@@ -39,12 +39,12 @@ Object.assign(PostsLayoutRoute.options, {
   getParentRoute: () => rootRoute,
 })
 
-Object.assign(PostsIndexRoute.options, {
+Object.assign(PostsRoute.options, {
   path: "/",
   getParentRoute: () => PostsLayoutRoute,
 })
 
-Object.assign(PostsPostIdIndexRoute.options, {
+Object.assign(PostsPostIdRoute.options, {
   path: "/$postId/",
   getParentRoute: () => PostsLayoutRoute,
 })
@@ -54,13 +54,13 @@ Object.assign(PostsPostIdDeepLayoutRoute.options, {
   getParentRoute: () => rootRoute,
 })
 
-Object.assign(PostsPostIdDeepIndexRoute.options, {
+Object.assign(PostsPostIdDeepRoute.options, {
   path: "/",
   getParentRoute: () => PostsPostIdDeepLayoutRoute,
 })
 
 export const routeTree = rootRoute.addChildren([
   IndexRoute,
-  PostsLayoutRoute.addChildren([PostsIndexRoute, PostsPostIdIndexRoute]),
-  PostsPostIdDeepLayoutRoute.addChildren([PostsPostIdDeepIndexRoute]),
+  PostsLayoutRoute.addChildren([PostsRoute, PostsPostIdRoute]),
+  PostsPostIdDeepLayoutRoute.addChildren([PostsPostIdDeepRoute]),
 ])
