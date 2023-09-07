@@ -13,6 +13,7 @@ export type RouteNode = {
   filePath: string
   fullPath: string
   variableName: string
+  isLayout: boolean
   routePath?: string
   cleanedPath?: string
   path?: string
@@ -20,7 +21,7 @@ export type RouteNode = {
   isNonLayout?: boolean
   isRoot?: boolean
   children?: RouteNode[]
-  parent?: RouteNode,
+  parent?: RouteNode
 }
 
 async function getRouteNodes(config: Config) {
@@ -58,15 +59,23 @@ async function getRouteNodes(config: Config) {
         } else {
           const filePath = path.join(dir, fileName)
           const filePathNoExt = removeExt(filePath)
-          let routePath = replaceBackslash(cleanPath(`/${filePathNoExt.split('.').join('/')}`)) ?? ''
+
+          let routePath =
+            replaceBackslash(
+              cleanPath(`/${filePathNoExt.split('.').join('/')}`),
+            ) ?? ''
+
+          const layout = isLayout(routePath) ?? false
           const variableName = fileToVariable(routePath)
 
           // Remove the index from the route path and
           // if the route path is empty, use `/'
           if (routePath === '/index') {
             routePath = '/'
+          } else if (layout) {
+            routePath = routePath.replace(`/${layoutPathId}`, '')
           } else if (routePath.endsWith('/index')) {
-            routePath = routePath.replace(/\/index$/, '')
+            routePath = routePath.replace(/\/index$/, '/')
           }
 
           routeNodes.push({
@@ -74,6 +83,7 @@ async function getRouteNodes(config: Config) {
             fullPath,
             routePath,
             variableName,
+            isLayout: layout,
           })
         }
       }),
@@ -126,35 +136,26 @@ export async function generator(config: Config) {
   const routeTree: RouteNode[] = []
 
   routeNodes.forEach((node) => {
-    const parentRoute = hasParentRoute(routeNodes, node.routePath)
+    const parentRoute = hasParentRoute(
+      routeNodes,
+      node.routePath,
+      node.isLayout,
+    )
     if (parentRoute) node.parent = parentRoute
 
     node.path = node.parent
       ? node.routePath?.replace(node.parent.routePath!, '') || '/'
       : node.routePath
 
-    const isLayout = node.routePath?.endsWith(`/${layoutPathId}`)
     const trimmedPath = trimPathLeft(node.path ?? '')
 
     const split = trimmedPath?.split('/') ?? []
-    let name = (isLayout ? split.pop() : split[0]) ?? trimmedPath ?? '';
+    let name = split[0] ?? trimmedPath ?? ''
 
     node.isNonPath = name.startsWith('_')
     node.isNonLayout = name.endsWith('_')
 
     node.cleanedPath = removeUnderscores(node.path) ?? ''
-
-    if (isLayout) {
-      const layoutChildRoute = node.routePath?.replace(`/${layoutPathId}`, "");
-      const layoutChild = routeNodes.find(d => d.routePath === layoutChildRoute)
-
-      if (layoutChild) {
-        layoutChild.parent = node;
-        node.children = [layoutChild]
-
-        removeExistingChild(routeTree, layoutChild.routePath!)
-      }
-    }
 
     if (node.parent) {
       node.parent.children ??= []
@@ -189,20 +190,25 @@ export async function generator(config: Config) {
       const route = `${node.variableName}Route`
 
       if (node.children?.length) {
-
         // If the current route is a layout i take the index child
         if (node.routePath?.endsWith(`/${layoutPathId}`)) {
-          const indexChild = node.children.pop();
+          const indexChild = node.children.pop()
 
           if (indexChild) {
             // Then we flatten the children to put everyone under the same layout
-            const flattenedChildren = [indexChild, ...(indexChild.children ?? [])]
+            const flattenedChildren = [
+              indexChild,
+              ...(indexChild.children ?? []),
+            ]
 
             // and we remove the children from the index route to avoid duplication
-            indexChild.children = undefined;
+            indexChild.children = undefined
 
             // then we pass the children to the recursion to analyse deep down
-            const childConfigs = await buildRouteConfig(flattenedChildren, depth + 1)
+            const childConfigs = await buildRouteConfig(
+              flattenedChildren,
+              depth + 1,
+            )
             return `${route}.addChildren([${spaces(depth * 4)}${childConfigs}])`
           }
         }
@@ -220,20 +226,25 @@ export async function generator(config: Config) {
   const routeConfigChildrenText = await buildRouteConfig(routeTree)
 
   const routeImports = [
-    `import { route as rootRoute } from './${sanitize(path.relative(
-      path.dirname(config.generatedRouteTree),
-      path.resolve(config.routesDirectory, rootPathId)))}'`,
+    `import { route as rootRoute } from './${sanitize(
+      path.relative(
+        path.dirname(config.generatedRouteTree),
+        path.resolve(config.routesDirectory, rootPathId),
+      ),
+    )}'`,
     ...multiSortBy(routeNodes, [
       (d) => (d.routePath?.includes(`/${rootPathId}`) ? -1 : 1),
       (d) => d.routePath?.split('/').length,
       (d) => d,
     ]).map((node) => {
-      return `import { route as ${node.variableName}Route } from './${sanitize(removeExt(
-        path.relative(
-          path.dirname(config.generatedRouteTree),
-          path.resolve(config.routesDirectory, node.filePath),
+      return `import { route as ${node.variableName}Route } from './${sanitize(
+        removeExt(
+          path.relative(
+            path.dirname(config.generatedRouteTree),
+            path.resolve(config.routesDirectory, node.filePath),
+          ),
         ),
-      ))}'`
+      )}'`
     }),
   ].join('\n')
 
@@ -252,10 +263,13 @@ export async function generator(config: Config) {
   const routeOptions = routeNodes
     .map((routeNode) => {
       return `Object.assign(${routeNode.variableName ?? 'root'}Route.options, {
-        ${[routeNode.isNonPath
-          ? `id: '${routeNode.cleanedPath}'`
-          : `path: '${routeNode.cleanedPath}'`,
-        `getParentRoute: () => ${routeNode.parent?.variableName ?? 'root'}Route`,
+        ${[
+          routeNode.isNonPath
+            ? `id: '${routeNode.cleanedPath}'`
+            : `path: '${routeNode.cleanedPath}'`,
+          `getParentRoute: () => ${
+            routeNode.parent?.variableName ?? 'root'
+          }Route`,
         ]
           .filter(Boolean)
           .join(',')}
@@ -349,60 +363,56 @@ export function multiSortBy<T>(
     .map(([d]) => d)
 }
 
+function isLayout(routePath: string | undefined) {
+  return routePath?.endsWith(`/${layoutPathId}`)
+}
+
+function hasParentRoute(
+  routes: RouteNode[],
+  routeToCheck: string | undefined,
+  isLayout?: boolean,
+): RouteNode | null {
+  if (!routeToCheck || routeToCheck === '/' || isLayout) {
+    return null
+  }
+
+  const orderedRoutes = multiSortBy(routes, [
+    (d) => (d.routePath?.split('/').length ?? 0) * -1,
+  ])
+
+  for (const route of orderedRoutes) {
+    if (route.routePath === '/') continue
+    if (
+      routeToCheck.startsWith(`${route.routePath}/`) &&
+      route.routePath !== routeToCheck
+    ) {
+      return route
+    }
+  }
+
+  const parentRoute = bubbleUp(routeToCheck)
+  return hasParentRoute(routes, parentRoute)
+}
+
 function capitalize(s: string) {
   if (typeof s !== 'string') return ''
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
-function sanitize(s?: string) {
+function sanitize(s: string | undefined) {
   return replaceBackslash(s?.replace(/\\index/gi, ''))
 }
 
-function removeUnderscores(s?: string) {
-  return s?.replace(/(^_|_$)/, '').replace(/(\/_|_\/)/, '/');
+function removeUnderscores(s: string | undefined) {
+  return s?.replace(/(^_|_$)/, '').replace(/(\/_|_\/)/, '/')
 }
 
-function replaceBackslash(s?: string) {
+function replaceBackslash(s: string | undefined) {
   return s?.replace(/\\/gi, '/')
 }
 
 function bubbleUp(routeToCheck: string) {
-  const segments = routeToCheck.split("/");
-  segments.pop();
-  return segments.join("/");
-}
-
-function hasParentRoute(routes: RouteNode[], routeToCheck: string | undefined): RouteNode | null {
-  if (!routeToCheck || routeToCheck === "/") {
-    return null;
-  }
-
-  if (!routeToCheck.endsWith(`/${layoutPathId}`)) {
-    const orderedRoutes = multiSortBy(routes, [(d) => (d.routePath?.split('/').length ?? 0) * -1])
-
-    for (const route of orderedRoutes) {
-      if (route.routePath === '/') continue;
-      if (routeToCheck.startsWith(`${route.routePath}/`) && route.routePath !== routeToCheck) {
-        return route;
-      }
-    }
-  }
-
-  const parentRoute = bubbleUp(routeToCheck);
-  return hasParentRoute(routes, parentRoute)
-}
-
-function removeExistingChild(tree: RouteNode[], routePath: string) {
-  for (const child of tree) {
-    const index = tree.findIndex(d => d.routePath === routePath)
-
-    if (index > -1) {
-      tree.splice(index, 1);
-      return;
-    }
-
-    if (child.children) {
-      removeExistingChild(child.children, routePath)
-    }
-  }
+  const segments = routeToCheck.split('/')
+  segments.pop()
+  return segments.join('/')
 }
